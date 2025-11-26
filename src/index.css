@@ -1,0 +1,70 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&family=Prata&display=swap");
+
+@import "tailwindcss";
+
+a.active hr {
+  display: block;
+}
+
+* {
+  font-family: "Outfit";
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+.prata-regular {
+  font-family: "Prata", serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+@layer components {
+  .inputStyle {
+    @apply w-full border rounded-xl px-4 py-3 bg-white outline-none focus:border-black;
+  }
+
+  .paymentOption {
+    @apply flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-gray-50;
+  }
+}
+
+@media (max-width: 640px) {
+  a.active {
+    background: black;
+    color: white;
+  }
+}
+
+@theme {
+  /* Gold Base */
+  --color-gold-base: #d4af37;
+
+  /* Lighter Shades */
+  --color-gold-light-20: #e1c760;
+  --color-gold-light-40: #eedfa1;
+  --color-gold-light-60: #faf4d1;
+
+  /* Darker Shades */
+  --color-gold-dark-20: #aa8c2c;
+  --color-gold-dark-40: #806a21;
+  --color-gold-dark-60: #574816;
+
+  /* Black */
+  --color-black: #000000;
+  --color-black-light: #333333;
+}
+
+/* #إليك درجة #D4AF37 (Gold) مع الأفتح و الأغمق محسوبة بدقة:
+
+🔆 الدرجات الأفتح (Lighter Shades)
+النسبة	الدرجة	الكود
++20%	أفتح قليلاً	#E1C760
++40%	أفتح بشكل واضح	#EEDFA1
++60%	دهبي باهت	#FAF4D1
+🌑 الدرجات الأغمق (Darker Shades)
+النسبة	الدرجة	الكود
+-20%	أغمق قليلاً	#AA8C2C
+-40%	أغمق بشكل قوي	#806A21
+-60%	دهبي غامق جداً	#574816*/
