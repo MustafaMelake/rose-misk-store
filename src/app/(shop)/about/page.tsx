@@ -74,9 +74,7 @@ const About: React.FC = () => {
           >
             <div className="overflow-hidden rounded-xl">
               <Image
-                src={
-                  "https://fkcqwx31dk.ufs.sh/f/Zddv4bf9RBdI6RYg7YLHRMuh7L8fOVYBFD5UEdxaqJXvnpsT"
-                }
+                src={"/about-img.webp"}
                 alt="Rose Misk Brand Logo"
                 width={500}
                 height={300}
