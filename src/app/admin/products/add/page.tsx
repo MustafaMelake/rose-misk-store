@@ -44,7 +44,9 @@ export default function AddProductPage() {
   };
 
   const [variants, setVariants] = useState([
+    { volume: "30ml", price: 0, stock: 10 },
     { volume: "50ml", price: 0, stock: 10 },
+    { volume: "100ml", price: 0, stock: 10 },
   ]);
 
   const handleAddVariant = () => {
