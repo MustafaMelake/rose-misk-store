@@ -8,6 +8,7 @@ import {
   ALL_GOVERNORATES,
   calculateShippingFee,
 } from "../../../../lib/shipping";
+import { formatPrice } from "@/lib/format";
 
 interface CartItem {
   id: number;
@@ -252,7 +253,7 @@ const PlaceOrder: React.FC = () => {
             <div className="flex justify-between text-gray-500 dark:text-gray-400 text-sm">
               <span>Subtotal</span>
               <span>
-                {currency} {subtotal.toFixed(2)}
+                {currency} {formatPrice(subtotal)}
               </span>
             </div>
             <div className="flex justify-between text-gray-500 dark:text-gray-400 text-sm">
@@ -260,14 +261,14 @@ const PlaceOrder: React.FC = () => {
               <span>
                 {dynamicDeliveryFee === 0
                   ? "اختر المحافظة"
-                  : `${currency} ${dynamicDeliveryFee.toFixed(2)}`}
+                  : `${currency} ${formatPrice(dynamicDeliveryFee)}`}
               </span>
             </div>
             <div className="h-[1px] bg-gray-100 dark:bg-zinc-800 my-2"></div>
             <div className="flex justify-between text-lg font-bold text-black dark:text-white">
               <span>Total</span>
               <span className="text-gold-base">
-                {currency} {total.toFixed(2)}
+                {currency} {formatPrice(total)}
               </span>
             </div>
           </div>
@@ -280,7 +281,7 @@ const PlaceOrder: React.FC = () => {
           <div className="flex flex-col gap-3">
             <label
               className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                paymentMethod === "cod"
+                paymentMethod === "COD"
                   ? "border-gold-base bg-gold-base/5"
                   : "border-gray-100 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800"
               }`}
@@ -289,13 +290,13 @@ const PlaceOrder: React.FC = () => {
                 <input
                   type="radio"
                   name="payment"
-                  checked={paymentMethod === "cod"}
-                  onChange={() => setPaymentMethod("cod")}
+                  checked={paymentMethod === "COD"}
+                  onChange={() => setPaymentMethod("COD")}
                   className="accent-gold-base w-4 h-4"
                 />
                 <span className="font-medium text-sm">Cash On Delivery</span>
               </div>
-              {paymentMethod === "cod" && (
+              {paymentMethod === "COD" && (
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               )}
             </label>

@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
 import { ShopContext } from "../context/ShopContext";
+import { formatPrice } from "@/lib/format";
 
 const CheckOut: React.FC = () => {
   const context = useContext(ShopContext);
@@ -17,7 +18,7 @@ const CheckOut: React.FC = () => {
         <span>Subtotal:</span>
         <span className="font-medium">
           {currency}
-          {subtotal.toFixed(2)}
+          {formatPrice(subtotal)}
         </span>
       </div>
 
@@ -39,7 +40,7 @@ const CheckOut: React.FC = () => {
         </div>
         <span>
           {currency}
-          {subtotal.toFixed(2)}
+          {formatPrice(subtotal)}
         </span>
       </div>
 

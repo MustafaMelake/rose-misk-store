@@ -163,12 +163,30 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
     return variant ? variant.price : 0;
   };
 
-  const addToCart = async (itemId: string | number, size: string) => {
-    let cartData = structuredClone(cartItems);
-    const idStr = String(itemId);
+  // Available stock for a variant, or null if the product/variant isn't loaded
+  // yet (in which case we don't block — the server still enforces stock).
+  const getVariantStock = (
+    productId: string | number,
+    size: string
+  ): number | null => {
+    const product = products.find((p) => String(p.id) === String(productId));
+    const variant = product?.variants.find((v) => v.volume === size);
+    return variant ? variant.stock : null;
+  };
 
+  const addToCart = async (itemId: string | number, size: string) => {
+    const idStr = String(itemId);
+    const currentQty = cartItems[idStr]?.[size] || 0;
+
+    // Don't let shoppers add more than what's physically in stock.
+    const stock = getVariantStock(itemId, size);
+    if (stock !== null && currentQty + 1 > stock) {
+      return;
+    }
+
+    let cartData = structuredClone(cartItems);
     if (cartData[idStr]) {
-      cartData[idStr][size] = (cartData[idStr][size] || 0) + 1;
+      cartData[idStr][size] = currentQty + 1;
     } else {
       cartData[idStr] = { [size]: 1 };
     }
@@ -187,20 +205,24 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
   ) => {
     let cartData = structuredClone(cartItems);
     const idStr = String(itemId);
+    let finalQuantity = quantity;
 
     if (quantity <= 0) {
       if (cartData[idStr]) delete cartData[idStr][size];
       if (cartData[idStr] && Object.keys(cartData[idStr]).length === 0)
         delete cartData[idStr];
     } else {
+      // Cap the requested quantity to the available stock.
+      const stock = getVariantStock(itemId, size);
+      finalQuantity = stock !== null ? Math.min(quantity, stock) : quantity;
       if (!cartData[idStr]) cartData[idStr] = {};
-      cartData[idStr][size] = quantity;
+      cartData[idStr][size] = finalQuantity;
     }
 
     setCartItems(cartData);
 
     if (userId) {
-      await updateCartInDB(Number(itemId), size, quantity);
+      await updateCartInDB(Number(itemId), size, finalQuantity);
     }
   };
 

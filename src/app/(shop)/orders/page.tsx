@@ -5,6 +5,7 @@ import Image from "next/image";
 import { ShopContext } from "../../../context/ShopContext";
 import Title from "../../../components/Title";
 import Footer from "@/components/Footer";
+import { formatPrice } from "@/lib/format";
 
 interface OrderItem {
   id: string | number;
@@ -172,18 +173,18 @@ const Orders: React.FC = () => {
                           </div>
                           <p className="sm:hidden font-bold text-gold-base mt-1">
                             {currency}
-                            {item.price.toFixed(2)}
+                            {formatPrice(item.price)}
                           </p>
                         </div>
 
                         <div className="hidden sm:block text-right">
                           <p className="font-bold text-gold-base">
                             {currency}
-                            {item.price.toFixed(2)}
+                            {formatPrice(item.price)}
                           </p>
                           <p className="text-xs text-gray-400">
                             Subtotal: {currency}
-                            {(item.price * item.quantity).toFixed(2)}
+                            {formatPrice(item.price * item.quantity)}
                           </p>
                         </div>
                       </div>
@@ -214,7 +215,7 @@ const Orders: React.FC = () => {
                         order.shippingFee > 0 && (
                           <p className="text-xs text-gray-400">
                             Shipping Fee: {currency}
-                            {Number(order.shippingFee).toFixed(2)}
+                            {formatPrice(order.shippingFee ?? 0)}
                           </p>
                         )}
                       <div className="flex items-center gap-2">
@@ -223,7 +224,7 @@ const Orders: React.FC = () => {
                         </span>
                         <p className="font-bold text-xl text-black dark:text-white">
                           {currency}
-                          {Number(order.total || 0).toFixed(2)}
+                          {formatPrice(order.total ?? 0)}
                         </p>
                       </div>
                     </div>

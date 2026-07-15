@@ -1,5 +1,5 @@
 "use server";
-import { Prisma } from "@prisma/client";
+import { Prisma, type OrderStatus } from "@prisma/client";
 import { prisma } from "../prisma";
 import { revalidatePath } from "next/cache";
 import { calculateShippingFee } from "../../lib/shipping";
@@ -19,6 +19,19 @@ export type OrderStatusType =
   | "DELIVERED"
   | "CANCELLED"
   | "AWAITING_PAYMENT";
+
+/**
+ * Allowed order status transitions. DELIVERED and CANCELLED are terminal —
+ * no further changes are permitted once an order reaches them.
+ */
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatusType[]> = {
+  PENDING: ["AWAITING_PAYMENT", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"],
+  AWAITING_PAYMENT: ["PAID", "PENDING", "SHIPPED", "CANCELLED"],
+  PAID: ["SHIPPED", "DELIVERED", "CANCELLED"],
+  SHIPPED: ["DELIVERED", "CANCELLED"],
+  DELIVERED: [],
+  CANCELLED: [],
+};
 
 /** Convert Prisma.Decimal (or number) into a plain number for the client. */
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
@@ -45,6 +58,16 @@ export async function createOrder(orderData: unknown, items: unknown) {
     const orderInput = parsedOrder.data;
     const orderItems = parsedItems.data;
 
+    // Card payments are not wired to a gateway yet — reject them explicitly
+    // instead of creating an order that can never be paid.
+    if (orderInput.paymentMethod === "CARD") {
+      return {
+        success: false,
+        message:
+          "Card payments are not available yet. Please choose Cash on Delivery.",
+      };
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       let serverTotal = new Prisma.Decimal(0);
       const orderItemsToCreate: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] =
@@ -55,7 +78,21 @@ export async function createOrder(orderData: unknown, items: unknown) {
           where: { productId: item.id, volume: item.size },
         });
 
-        if (!variant || variant.stock < item.quantity) {
+        if (!variant) {
+          throw new PublicError(
+            `المنتج ذو الحجم ${item.size} غير متوفر بالكمية المطلوبة.`
+          );
+        }
+
+        // Atomic, conditional decrement: the stock check and the write happen
+        // in a single statement, so two shoppers cannot both buy the last unit.
+        // If the guard fails, count === 0 and the whole transaction rolls back.
+        const updated = await tx.productVariant.updateMany({
+          where: { id: variant.id, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+
+        if (updated.count === 0) {
           throw new PublicError(
             `المنتج ذو الحجم ${item.size} غير متوفر بالكمية المطلوبة.`
           );
@@ -70,18 +107,13 @@ export async function createOrder(orderData: unknown, items: unknown) {
           price: unitPrice,
           size: item.size,
         });
-
-        await tx.productVariant.update({
-          where: { id: variant.id },
-          data: { stock: { decrement: item.quantity } },
-        });
       }
 
       const deliveryFee = calculateShippingFee(orderInput.governorate);
       const finalTotal = serverTotal.add(deliveryFee);
 
-      const initialStatus: OrderStatusType =
-        orderInput.paymentMethod === "CARD" ? "AWAITING_PAYMENT" : "PENDING";
+      // Only COD reaches this point (CARD is rejected above).
+      const initialStatus: OrderStatusType = "PENDING";
 
       const orderCreationData: Prisma.OrderUncheckedCreateInput = {
         customerName: orderInput.customerName,
@@ -231,25 +263,39 @@ export async function updateOrderStatus(
       return { success: false, message: "Order not found" };
     }
 
+    // Enforce the state machine: terminal states can't move, and only the
+    // declared transitions are permitted.
+    const allowedNext = ALLOWED_TRANSITIONS[existingOrder.status] ?? [];
+    if (!allowedNext.includes(newStatus)) {
+      return {
+        success: false,
+        message: `Cannot change order status from ${existingOrder.status} to ${newStatus}.`,
+      };
+    }
+
     await prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: newStatus },
-      });
+      if (newStatus === "CANCELLED") {
+        // Flip to CANCELLED only if it isn't already — atomic so two
+        // concurrent cancellations can't both restock the same order.
+        const res = await tx.order.updateMany({
+          where: { id: orderId, status: { not: "CANCELLED" } },
+          data: { status: "CANCELLED" },
+        });
 
-      if (newStatus === "CANCELLED" && existingOrder.status !== "CANCELLED") {
-        for (const item of existingOrder.items) {
-          const variant = await tx.productVariant.findFirst({
-            where: { productId: item.productId, volume: item.size },
-          });
-
-          if (variant) {
-            await tx.productVariant.update({
-              where: { id: variant.id },
+        // Restock only when this call is the one that performed the cancel.
+        if (res.count === 1) {
+          for (const item of existingOrder.items) {
+            await tx.productVariant.updateMany({
+              where: { productId: item.productId, volume: item.size },
               data: { stock: { increment: item.quantity } },
             });
           }
         }
+      } else {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: newStatus },
+        });
       }
     });
 

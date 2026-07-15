@@ -24,6 +24,23 @@ export async function submitReview({
       return { success: false, error: "Rating must be between 1 and 5." };
     }
 
+    // Only customers who actually received the product may review it.
+    const deliveredPurchase = await prisma.order.findFirst({
+      where: {
+        userId: user.id,
+        status: "DELIVERED",
+        items: { some: { productId } },
+      },
+      select: { id: true },
+    });
+
+    if (!deliveredPurchase) {
+      return {
+        success: false,
+        error: "You can only review products from a delivered order.",
+      };
+    }
+
     await prisma.review.create({
       data: {
         productId: productId,
