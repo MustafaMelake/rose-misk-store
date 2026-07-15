@@ -1,9 +1,15 @@
 "use server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
-import { auth } from "../auth";
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { calculateShippingFee } from "../../lib/shipping";
+import {
+  getCurrentUser,
+  requireUser,
+  requireAdmin,
+  PublicError,
+  toPublicMessage,
+} from "@/lib/auth-guards";
 
 export type OrderStatusType =
   | "PENDING"
@@ -13,14 +19,23 @@ export type OrderStatusType =
   | "CANCELLED"
   | "AWAITING_PAYMENT";
 
+/** Convert Prisma.Decimal (or number) into a plain number for the client. */
+function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+  return value == null ? 0 : Number(value);
+}
+
 export async function createOrder(
-  userId: string | null,
   orderData: any,
   items: { id: number; size: string; quantity: number }[]
 ) {
   try {
+    // Identity is derived from the session, never from the client.
+    // A null user is a valid guest checkout.
+    const currentUser = await getCurrentUser();
+    const userId = currentUser?.id ?? null;
+
     const result = await prisma.$transaction(async (tx) => {
-      let serverTotal = 0;
+      let serverTotal = new Prisma.Decimal(0);
       const orderItemsToCreate = [];
 
       for (const item of items) {
@@ -29,17 +44,18 @@ export async function createOrder(
         });
 
         if (!variant || variant.stock < item.quantity) {
-          throw new Error(
+          throw new PublicError(
             `المنتج ذو الحجم ${item.size} غير متوفر بالكمية المطلوبة.`
           );
         }
 
-        serverTotal += variant.price * item.quantity;
+        const unitPrice = new Prisma.Decimal(variant.price);
+        serverTotal = serverTotal.add(unitPrice.mul(item.quantity));
 
         orderItemsToCreate.push({
           productId: item.id,
           quantity: item.quantity,
-          price: variant.price,
+          price: unitPrice,
           size: item.size,
         });
 
@@ -50,7 +66,7 @@ export async function createOrder(
       }
 
       const deliveryFee = calculateShippingFee(orderData.governorate);
-      const finalTotal = serverTotal + deliveryFee;
+      const finalTotal = serverTotal.add(deliveryFee);
 
       const initialStatus = (
         orderData.paymentMethod === "CARD" ? "AWAITING_PAYMENT" : "PENDING"
@@ -87,16 +103,23 @@ export async function createOrder(
     revalidatePath("/orders");
 
     return { success: true, orderId: result.id };
-  } catch (error: any) {
-    console.error("Order Action Error:", error.message);
-    return { success: false, message: error.message };
+  } catch (error) {
+    console.error("createOrder error:", error);
+    return {
+      success: false,
+      message: toPublicMessage(
+        error,
+        "Failed to place your order. Please try again."
+      ),
+    };
   }
 }
 
-export async function getUserOrders(userId: string) {
+export async function getUserOrders() {
   try {
+    const user = await requireUser();
     const orders = await prisma.order.findMany({
-      where: { userId },
+      where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       include: {
         items: {
@@ -120,8 +143,8 @@ export async function getUserOrders(userId: string) {
       }),
       status: order.status,
       payment: order.paymentMethod,
-      total: order.totalAmount,
-      shippingFee: order.shippingFee,
+      total: toNumber(order.totalAmount),
+      shippingFee: toNumber(order.shippingFee),
       governorate: order.governorate,
       items: order.items.map((item) => ({
         id: item.productId,
@@ -129,26 +152,23 @@ export async function getUserOrders(userId: string) {
         image: item.product.images[0] || "",
         size: item.size,
         quantity: item.quantity,
-        price: item.price,
+        price: toNumber(item.price),
       })),
     }));
 
     return { success: true, orders: formattedOrders };
-  } catch (error: any) {
-    console.error("Fetch Orders Error:", error);
-    return { success: false, message: error.message };
+  } catch (error) {
+    console.error("getUserOrders error:", error);
+    return {
+      success: false,
+      message: toPublicMessage(error, "Could not load your orders."),
+    };
   }
 }
 
 export async function getAllOrders() {
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-
-    if (!session || session.user.role !== "ADMIN") {
-      return { success: false, message: "Unauthorized Access: Admins only." };
-    }
+    await requireAdmin();
 
     const orders = await prisma.order.findMany({
       orderBy: { createdAt: "desc" },
@@ -164,10 +184,23 @@ export async function getAllOrders() {
       },
     });
 
-    return { success: true, orders };
+    const serialized = orders.map((order) => ({
+      ...order,
+      totalAmount: toNumber(order.totalAmount),
+      shippingFee: toNumber(order.shippingFee),
+      items: (order.items ?? []).map((item) => ({
+        ...item,
+        price: toNumber(item.price),
+      })),
+    }));
+
+    return { success: true, orders: serialized };
   } catch (error) {
-    console.error("Admin Fetch Error:", error);
-    return { success: false, message: "Failed to fetch orders" };
+    console.error("getAllOrders error:", error);
+    return {
+      success: false,
+      message: toPublicMessage(error, "Failed to fetch orders"),
+    };
   }
 }
 
@@ -176,13 +209,7 @@ export async function updateOrderStatus(
   newStatus: OrderStatusType
 ) {
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-
-    if (!session || session.user.role !== "ADMIN") {
-      return { success: false, message: "Unauthorized" };
-    }
+    await requireAdmin();
 
     const existingOrder = await prisma.order.findUnique({
       where: { id: orderId },
@@ -220,7 +247,10 @@ export async function updateOrderStatus(
 
     return { success: true };
   } catch (error) {
-    console.error("Update Status Error:", error);
-    return { success: false, message: "Update failed" };
+    console.error("updateOrderStatus error:", error);
+    return {
+      success: false,
+      message: toPublicMessage(error, "Update failed"),
+    };
   }
 }

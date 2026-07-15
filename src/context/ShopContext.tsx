@@ -116,8 +116,12 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     const fetchAll = async () => {
       const data = await getAllProducts(1, 100);
+      // Server DTO -> client model: variant prices are already numbers at
+      // runtime (serialized from Prisma.Decimal in the action).
       setProducts(
-        data?.products && Array.isArray(data.products) ? data.products : []
+        data?.products && Array.isArray(data.products)
+          ? (data.products as unknown as Product[])
+          : []
       );
     };
     fetchAll();
@@ -131,9 +135,9 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
       if (userId) {
         if (Object.keys(localCart).length > 0) {
           localStorage.removeItem("rose_misk_cart");
-          await mergeCartAction(userId, localCart);
+          await mergeCartAction(localCart);
         }
-        const result = await getUserCart(userId);
+        const result = await getUserCart();
         if (result.success) {
           setCartItems(result.cartData);
         }
@@ -175,7 +179,7 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
     setCartItems(cartData);
 
     if (userId) {
-      await updateCartInDB(userId, Number(itemId), size, cartData[idStr][size]);
+      await updateCartInDB(Number(itemId), size, cartData[idStr][size]);
     }
   };
 
@@ -199,7 +203,7 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
     setCartItems(cartData);
 
     if (userId) {
-      await updateCartInDB(userId, Number(itemId), size, quantity);
+      await updateCartInDB(Number(itemId), size, quantity);
     }
   };
 
@@ -217,7 +221,7 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
 
   const fetchUserOrders = async () => {
     if (userId) {
-      const result = await getUserOrders(userId);
+      const result = await getUserOrders();
       if (result.success && result.orders) {
         setUserOrders(result.orders);
       }
@@ -253,11 +257,7 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
       totalAmount: total,
     };
 
-    const result = await createOrder(
-      userId || null,
-      orderPayload,
-      formattedItems
-    );
+    const result = await createOrder(orderPayload, formattedItems);
 
     if (result.success) {
       setCartItems({});

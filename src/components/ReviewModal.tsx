@@ -44,7 +44,6 @@ export default function ReviewModal({
 
     const result = await submitReview({
       productId,
-      userId,
       rating,
       comment,
     });

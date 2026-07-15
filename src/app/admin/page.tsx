@@ -33,10 +33,16 @@ export default async function AdminDashboard() {
       createdAt: {
         gte: new Date(new Date().setMonth(new Date().getMonth() - 6)),
       },
-      status: { in: ["SHIPPED", "DELIVERED"] }, 
+      status: { in: ["SHIPPED", "DELIVERED"] },
     },
     select: { totalAmount: true, createdAt: true },
   });
+
+  // Serialize Decimal -> number before handing data to a client component.
+  const chartOrders = rawOrders.map((o) => ({
+    totalAmount: Number(o.totalAmount),
+    createdAt: o.createdAt,
+  }));
 
   return (
     <div className="flex-1 space-y-6 p-6 pt-2">
@@ -55,7 +61,7 @@ export default async function AdminDashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title="Total Revenue"
-          value={`${totalRevenue._sum.totalAmount?.toLocaleString() || 0} EGP`}
+          value={`${Number(totalRevenue._sum.totalAmount ?? 0).toLocaleString()} EGP`}
           icon={<DollarSign className="h-4 w-4 text-gold-500" />}
           description="Confirmed earnings (Shipped & Delivered)"
         />
@@ -98,7 +104,7 @@ export default async function AdminDashboard() {
           </CardHeader>
           <CardContent className="p-6">
             <div className="h-[450px]">
-              <RevenueChart orders={rawOrders} />
+              <RevenueChart orders={chartOrders} />
             </div>
           </CardContent>
         </Card>

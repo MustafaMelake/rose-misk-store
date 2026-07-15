@@ -31,6 +31,22 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
+// 3. Mock the auth guards — the reviewer id comes from the session and
+// approvals require an admin.
+vi.mock("@/lib/auth-guards", () => {
+  class PublicError extends Error {}
+  class AuthError extends PublicError {}
+  return {
+    PublicError,
+    AuthError,
+    getCurrentUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireAdmin: vi.fn(async () => ({ id: "admin_1", role: "ADMIN" })),
+    toPublicMessage: (e: any, fb = "An unexpected error occurred.") =>
+      e instanceof PublicError ? e.message : fb,
+  };
+});
+
 describe("Review Server Actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();

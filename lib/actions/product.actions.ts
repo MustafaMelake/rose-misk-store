@@ -2,9 +2,25 @@
 
 import { prisma } from "../prisma";
 import { revalidatePath } from "next/cache";
+import { requireAdmin, PublicError, toPublicMessage } from "@/lib/auth-guards";
+
+/**
+ * Serialize a product's variant prices from Prisma.Decimal to plain numbers
+ * so client components can do arithmetic on them. Only touches products that
+ * actually have variants loaded. Runtime returns numbers; the static type is
+ * preserved for callers (the ShopContext boundary casts to its own model).
+ */
+function serializeProduct<T extends { variants?: any[] }>(product: T): T {
+  if (!product?.variants) return product;
+  return {
+    ...product,
+    variants: product.variants.map((v) => ({ ...v, price: Number(v.price) })),
+  } as T;
+}
 
 export async function getAdminProducts() {
   try {
+    await requireAdmin();
     const products = await prisma.product.findMany({
       include: {
         category: true,
@@ -15,10 +31,13 @@ export async function getAdminProducts() {
       },
     });
 
-    return { success: true, data: products };
+    return { success: true, data: products.map(serializeProduct) };
   } catch (error) {
     console.error("Error fetching products:", error);
-    return { success: false, error: "Failed to fetch products" };
+    return {
+      success: false,
+      error: toPublicMessage(error, "Failed to fetch products"),
+    };
   }
 }
 
@@ -35,6 +54,7 @@ export async function createProduct(data: {
   variants: { volume: string; price: number; stock: number }[];
 }) {
   try {
+    await requireAdmin();
     const generatedSlug =
       data.name
         .toLowerCase()
@@ -68,12 +88,13 @@ export async function createProduct(data: {
     return { success: true, data: newProduct };
   } catch (error) {
     console.error("PRISMA ERROR:", error);
-    return { success: false, error: "حدث خطأ ما" };
+    return { success: false, error: toPublicMessage(error, "حدث خطأ ما") };
   }
 }
 
 export async function deleteProduct(productId: number) {
   try {
+    await requireAdmin();
     await prisma.product.delete({
       where: { id: productId },
     });
@@ -83,7 +104,10 @@ export async function deleteProduct(productId: number) {
     return { success: true };
   } catch (error) {
     console.error("Delete Error:", error);
-    return { success: false, error: "فشل في حذف المنتج" };
+    return {
+      success: false,
+      error: toPublicMessage(error, "فشل في حذف المنتج"),
+    };
   }
 }
 
@@ -116,7 +140,7 @@ export async function getProductById(id: string) {
 
     if (!product) return { success: false, error: "Product not found" };
 
-    return { success: true, data: product };
+    return { success: true, data: serializeProduct(product) };
   } catch (error) {
     console.error("Get Product Error:", error);
     return { success: false, error: "Database error occurred" };
@@ -125,14 +149,15 @@ export async function getProductById(id: string) {
 
 export async function updateProduct(id: number, data: any) {
   try {
-    if (isNaN(id)) throw new Error("Invalid Product ID");
+    await requireAdmin();
+    if (isNaN(id)) throw new PublicError("Invalid Product ID");
 
     let parsedCategoryId: number | null | undefined = undefined;
 
     if (data.categoryId) {
       const num = Number(data.categoryId);
       if (isNaN(num)) {
-        throw new Error("Invalid Category ID format");
+        throw new PublicError("Invalid Category ID format");
       }
       parsedCategoryId = num;
     } else if (data.categoryId === null || data.categoryId === "") {
@@ -167,23 +192,24 @@ export async function updateProduct(id: number, data: any) {
     revalidatePath("/", "layout");
     return { success: true, data: updatedProduct };
   } catch (error: any) {
-    console.error("CRITICAL DATABASE ERROR:", error.message || error);
+    console.error("CRITICAL DATABASE ERROR:", error?.message || error);
     return {
       success: false,
-      error: error.message || "حدث خطأ غير معروف أثناء التحديث.",
+      error: toPublicMessage(error, "حدث خطأ غير معروف أثناء التحديث."),
     };
   }
 }
 
 export async function getBestSellers() {
   try {
-    return await prisma.product.findMany({
+    const products = await prisma.product.findMany({
       where: { isFeatured: true },
       include: {
         variants: true,
       },
       take: 5,
     });
+    return products.map(serializeProduct);
   } catch (error) {
     console.error("Error:", error);
     return [];
@@ -192,13 +218,14 @@ export async function getBestSellers() {
 
 export async function getLatestProducts() {
   try {
-    return await prisma.product.findMany({
+    const products = await prisma.product.findMany({
       orderBy: { createdAt: "desc" },
       include: {
         variants: true,
       },
       take: 10,
     });
+    return products.map(serializeProduct);
   } catch (error) {
     console.error("Error:", error);
     return [];
@@ -226,7 +253,7 @@ export async function getAllProducts(page: number = 1, limit: number = 12) {
     ]);
 
     return {
-      products,
+      products: products.map(serializeProduct),
       totalCount,
       totalPages: Math.ceil(totalCount / limit),
       currentPage: page,
@@ -265,6 +292,7 @@ export async function searchProducts(query: string) {
 
 export async function getTopSellingProducts() {
   try {
+    await requireAdmin();
     const topSellersGrouping = await prisma.orderItem.groupBy({
       by: ["productId"],
       _sum: {
@@ -302,7 +330,7 @@ export async function getTopSellingProducts() {
         (oi) => oi.productId === item.productId
       );
       const totalRevenue = productOrders.reduce(
-        (sum, current) => sum + current.quantity * current.price,
+        (sum, current) => sum + current.quantity * Number(current.price),
         0
       );
 
@@ -325,6 +353,7 @@ export async function getTopSellingProducts() {
 
 export async function getTopRatedProducts() {
   try {
+    await requireAdmin();
     const topRated = await prisma.product.findMany({
       where: {
         reviewsCount: { gt: 0 },
@@ -350,6 +379,7 @@ export async function getTopRatedProducts() {
 
 export async function getInventoryProducts() {
   try {
+    await requireAdmin();
     const products = await prisma.productVariant.findMany({
       include: {
         product: {

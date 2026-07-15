@@ -174,7 +174,7 @@ describe("ShopContextProvider", () => {
     );
 
     await waitFor(() => {
-      expect(getUserCart).toHaveBeenCalledWith("user_vibe_123");
+      expect(getUserCart).toHaveBeenCalledWith();
     });
 
     const addBtn = screen.getByTestId("add-btn");
@@ -183,7 +183,7 @@ describe("ShopContextProvider", () => {
       fireEvent.click(addBtn);
     });
 
-    expect(updateCartInDB).toHaveBeenCalledWith("user_vibe_123", 1, "50ml", 1);
+    expect(updateCartInDB).toHaveBeenCalledWith(1, "50ml", 1);
   });
 
   it("should merge local cart into DB cart upon login if local cart has items", async () => {
@@ -208,7 +208,7 @@ describe("ShopContextProvider", () => {
     );
 
     await waitFor(() => {
-      expect(mergeCartAction).toHaveBeenCalledWith("user_vibe_123", {
+      expect(mergeCartAction).toHaveBeenCalledWith({
         "1": { "100ml": 2 },
       });
       expect(localStorage.getItem("rose_misk_cart")).toBeNull();

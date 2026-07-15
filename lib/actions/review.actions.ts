@@ -2,29 +2,32 @@
 
 import { prisma } from "../prisma";
 import { revalidatePath } from "next/cache";
+import { requireUser, requireAdmin, toPublicMessage } from "@/lib/auth-guards";
 
 interface SubmitReviewInput {
   productId: number;
-  userId: string;
   rating: number;
   comment?: string;
 }
 
 export async function submitReview({
   productId,
-  userId,
   rating,
   comment,
 }: SubmitReviewInput) {
   try {
+    // Identity comes from the session — a client can no longer post a
+    // review as an arbitrary user id.
+    const user = await requireUser();
+
     if (rating < 1 || rating > 5) {
       return { success: false, error: "Rating must be between 1 and 5." };
     }
 
-    const newReview = await prisma.review.create({
+    await prisma.review.create({
       data: {
         productId: productId,
-        userId: userId,
+        userId: user.id,
         rating: rating,
         comment: comment?.trim() || null,
         status: "PENDING",
@@ -36,18 +39,24 @@ export async function submitReview({
       message: "Review submitted and is pending admin approval.",
     };
   } catch (error: any) {
-    if (error.code === "P2002") {
+    if (error?.code === "P2002") {
       return {
         success: false,
         error: "You have already submitted a review for this product.",
       };
     }
-    return { success: false, error: "Failed to submit review." };
+    console.error("submitReview error:", error);
+    return {
+      success: false,
+      error: toPublicMessage(error, "Failed to submit review."),
+    };
   }
 }
 
 export async function approveReview(reviewId: string, productId: number) {
   try {
+    await requireAdmin();
+
     await prisma.$transaction(async (tx) => {
       await tx.review.update({
         where: { id: reviewId },
@@ -80,12 +89,18 @@ export async function approveReview(reviewId: string, productId: number) {
     revalidatePath(`/admin/reviews`);
     return { success: true, message: "Review approved successfully." };
   } catch (error) {
-    return { success: false, error: "Failed to approve review." };
+    console.error("approveReview error:", error);
+    return {
+      success: false,
+      error: toPublicMessage(error, "Failed to approve review."),
+    };
   }
 }
 
 export async function declineReview(reviewId: string) {
   try {
+    await requireAdmin();
+
     await prisma.review.update({
       where: { id: reviewId },
       data: { status: "REJECTED" },
@@ -95,12 +110,18 @@ export async function declineReview(reviewId: string) {
 
     return { success: true, message: "Review declined." };
   } catch (error) {
-    return { success: false, error: "Failed to decline review." };
+    console.error("declineReview error:", error);
+    return {
+      success: false,
+      error: toPublicMessage(error, "Failed to decline review."),
+    };
   }
 }
 
 export async function getPendingReviews() {
   try {
+    await requireAdmin();
+
     const reviews = await prisma.review.findMany({
       where: { status: "PENDING" },
       include: {

@@ -4,7 +4,7 @@ import {
   updateCartInDB,
   clearUserCart,
   mergeCartAction,
-} from "./cart.actions"; 
+} from "./cart.actions";
 import { prisma } from "../prisma";
 
 // 1. Mock the Prisma Client
@@ -18,10 +18,25 @@ vi.mock("../prisma", () => ({
   },
 }));
 
+// 2. Mock the auth guards — identity is now derived server-side.
+vi.mock("@/lib/auth-guards", () => {
+  class PublicError extends Error {}
+  class AuthError extends PublicError {}
+  return {
+    PublicError,
+    AuthError,
+    getCurrentUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireAdmin: vi.fn(async () => ({ id: "admin_1", role: "ADMIN" })),
+    toPublicMessage: (e: any, fb = "An unexpected error occurred.") =>
+      e instanceof PublicError ? e.message : fb,
+  };
+});
+
 describe("Cart Server Actions", () => {
   const mockUserId = "user_123";
 
-  // 2. Clear mock history before each test to prevent data leakage between tests
+  // Clear mock history before each test to prevent data leakage between tests
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -35,8 +50,8 @@ describe("Cart Server Actions", () => {
         { productId: 2, size: "Standard", quantity: 5 },
       ]);
 
-      // Act: Call the action
-      const result = await getUserCart(mockUserId);
+      // Act: Call the action (identity comes from the mocked session)
+      const result = await getUserCart();
 
       // Assert: Verify the transformation logic
       expect(prisma.cartItem.findMany).toHaveBeenCalledWith({
@@ -56,7 +71,7 @@ describe("Cart Server Actions", () => {
       );
 
       // Act
-      const result = await getUserCart(mockUserId);
+      const result = await getUserCart();
 
       // Assert
       expect(result.success).toBe(false);
@@ -70,7 +85,7 @@ describe("Cart Server Actions", () => {
       (prisma.cartItem.deleteMany as any).mockResolvedValue({ count: 1 });
 
       // Act
-      const result = await updateCartInDB(mockUserId, 10, "50ml", 0);
+      const result = await updateCartInDB(10, "50ml", 0);
 
       // Assert
       expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({
@@ -85,7 +100,7 @@ describe("Cart Server Actions", () => {
       (prisma.cartItem.upsert as any).mockResolvedValue({});
 
       // Act
-      const result = await updateCartInDB(mockUserId, 10, "50ml", 3);
+      const result = await updateCartInDB(10, "50ml", 3);
 
       // Assert
       expect(prisma.cartItem.upsert).toHaveBeenCalledWith({
@@ -113,7 +128,7 @@ describe("Cart Server Actions", () => {
         new Error("Network Error")
       );
 
-      const result = await updateCartInDB(mockUserId, 10, "50ml", 3);
+      const result = await updateCartInDB(10, "50ml", 3);
 
       expect(result.success).toBe(false);
     });
@@ -123,7 +138,7 @@ describe("Cart Server Actions", () => {
     it("should clear all user cart items", async () => {
       (prisma.cartItem.deleteMany as any).mockResolvedValue({ count: 5 });
 
-      const result = await clearUserCart(mockUserId);
+      const result = await clearUserCart();
 
       expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({
         where: { userId: mockUserId },
@@ -136,7 +151,7 @@ describe("Cart Server Actions", () => {
         new Error("Failed")
       );
 
-      const result = await clearUserCart(mockUserId);
+      const result = await clearUserCart();
 
       expect(result.success).toBe(false);
     });
@@ -152,7 +167,7 @@ describe("Cart Server Actions", () => {
       (prisma.cartItem.upsert as any).mockResolvedValue({});
 
       // Act
-      const result = await mergeCartAction(mockUserId, localCart);
+      const result = await mergeCartAction(localCart);
 
       // Assert
       expect(result.success).toBe(true);
@@ -178,7 +193,7 @@ describe("Cart Server Actions", () => {
         new Error("Merge error")
       );
 
-      const result = await mergeCartAction(mockUserId, localCart);
+      const result = await mergeCartAction(localCart);
 
       expect(result.success).toBe(false);
     });

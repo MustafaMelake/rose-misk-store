@@ -6,7 +6,7 @@ import {
   updateOrderStatus,
 } from "./order.actions";
 import { prisma } from "../prisma";
-import { auth } from "../auth";
+import { requireAdmin, AuthError } from "@/lib/auth-guards";
 import { revalidatePath } from "next/cache";
 
 // 1. Mock Prisma and $transaction
@@ -31,25 +31,27 @@ vi.mock("../prisma", () => ({
   },
 }));
 
-// 2. Mock Auth (Better-Auth / NextAuth)
-vi.mock("../auth", () => ({
-  auth: {
-    api: {
-      getSession: vi.fn(),
-    },
-  },
-}));
+// 2. Mock the auth guards — identity/authorization is derived server-side.
+vi.mock("@/lib/auth-guards", () => {
+  class PublicError extends Error {}
+  class AuthError extends PublicError {}
+  return {
+    PublicError,
+    AuthError,
+    getCurrentUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireUser: vi.fn(async () => ({ id: "user_123", role: "USER" })),
+    requireAdmin: vi.fn(async () => ({ id: "admin_1", role: "ADMIN" })),
+    toPublicMessage: (e: any, fb = "An unexpected error occurred.") =>
+      e instanceof PublicError ? e.message : fb,
+  };
+});
 
-// 3. Mock Next.js Headers and Cache
-vi.mock("next/headers", () => ({
-  headers: vi.fn(() => new Headers()),
-}));
-
+// 3. Mock Next.js Cache
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-// 4. Mock ملف الشحن لضمان عزل دالة الفحص (Unit Isolation) أو استخدام قيم افتراضية متوقعة
+// 4. Mock shipping to isolate the fee calculation
 vi.mock("../../lib/shipping", () => ({
   calculateShippingFee: vi.fn((gov) => {
     if (gov === "القاهرة") return 75;
@@ -66,12 +68,11 @@ describe("Order Server Actions", () => {
   });
 
   describe("createOrder", () => {
-    // تحديث الموك داتا ليشمل حقل المحافظة الجديد
     const mockOrderData = {
       customerName: "John Doe",
       customerEmail: "john@example.com",
       customerPhone: "123456789",
-      governorate: "القاهرة", // المحافظة المضافة
+      governorate: "القاهرة",
       address: "123 Main St",
       paymentMethod: "COD",
     };
@@ -79,7 +80,7 @@ describe("Order Server Actions", () => {
     const mockItems = [{ id: 1, size: "50ml", quantity: 2 }];
 
     it("should successfully create an order and clear the cart", async () => {
-      // Arrange: موك للمنتج بسعر 100 ومخزون كافي
+      // Arrange: variant priced at 100 with enough stock
       (prisma.productVariant.findFirst as any).mockResolvedValue({
         id: 99,
         productId: 1,
@@ -90,8 +91,8 @@ describe("Order Server Actions", () => {
 
       (prisma.order.create as any).mockResolvedValue({ id: 1001 });
 
-      // Act
-      const result = await createOrder(mockUserId, mockOrderData, mockItems);
+      // Act — userId is derived from the session, not passed by the client
+      const result = await createOrder(mockOrderData, mockItems);
 
       // Assert
       expect(prisma.productVariant.findFirst).toHaveBeenCalledWith({
@@ -103,17 +104,19 @@ describe("Order Server Actions", () => {
         data: { stock: { decrement: 2 } },
       });
 
-      // الحسبة الجديدة: المنتجات (2 * 100) + شحن القاهرة (75) = 275
-      expect(prisma.order.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      const callArgs = (prisma.order.create as any).mock.calls[0][0];
+      expect(callArgs.data).toEqual(
+        expect.objectContaining({
           customerName: "John Doe",
-          governorate: "القاهرة", // التأكد من حفظ المحافظة
-          shippingFee: 75, // التأكد من حفظ مصاريف الشحن الصحيحة
-          totalAmount: 275, // الإجمالي المحدث (بدل 280 القديم)
+          governorate: "القاهرة",
           status: "PENDING",
           userId: mockUserId,
-        }),
-      });
+        })
+      );
+      // Money is stored as Decimal; compare numeric value
+      // (2 * 100) + shipping (75) = 275
+      expect(Number(callArgs.data.shippingFee)).toBe(75);
+      expect(Number(callArgs.data.totalAmount)).toBe(275);
 
       expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({
         where: { userId: mockUserId },
@@ -127,11 +130,12 @@ describe("Order Server Actions", () => {
       // Arrange
       (prisma.productVariant.findFirst as any).mockResolvedValue({
         id: 99,
-        stock: 1, // طلب 2 ومعندناش غير 1
+        price: 100,
+        stock: 1, // requested 2, only 1 available
       });
 
       // Act
-      const result = await createOrder(mockUserId, mockOrderData, mockItems);
+      const result = await createOrder(mockOrderData, mockItems);
 
       // Assert
       expect(result.success).toBe(false);
@@ -151,8 +155,8 @@ describe("Order Server Actions", () => {
           status: "DELIVERED",
           paymentMethod: "CARD",
           totalAmount: 575,
-          shippingFee: 75, // حقل مضاف لقاعدة البيانات
-          governorate: "القاهرة", // حقل مضاف لقاعدة البيانات
+          shippingFee: 75,
+          governorate: "القاهرة",
           items: [
             {
               productId: 10,
@@ -166,24 +170,22 @@ describe("Order Server Actions", () => {
       ]);
 
       // Act
-      const result = await getUserOrders(mockUserId);
+      const result = await getUserOrders();
 
       // Assert
       expect(result.success).toBe(true);
       expect(result.orders![0].id).toBe(1);
       expect(result.orders![0].status).toBe("DELIVERED");
-      expect(result.orders![0].shippingFee).toBe(75); // فحص تسليم قيمة الشحن للفرونت
-      expect(result.orders![0].governorate).toBe("القاهرة"); // فحص تسليم اسم المحافظة للفرونت
+      expect(result.orders![0].shippingFee).toBe(75);
+      expect(result.orders![0].governorate).toBe("القاهرة");
       expect(result.orders![0].items[0].name).toBe("Perfume A");
+      expect(result.orders![0].items[0].price).toBe(500);
     });
   });
 
   describe("getAllOrders (Admin)", () => {
     it("should return orders if user is ADMIN", async () => {
       // Arrange
-      (auth.api.getSession as any).mockResolvedValue({
-        user: { role: "ADMIN" },
-      });
       (prisma.order.findMany as any).mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
       // Act
@@ -195,10 +197,10 @@ describe("Order Server Actions", () => {
     });
 
     it("should return unauthorized if user is not ADMIN or not logged in", async () => {
-      // Arrange
-      (auth.api.getSession as any).mockResolvedValue({
-        user: { role: "USER" },
-      });
+      // Arrange: the admin guard rejects
+      vi.mocked(requireAdmin).mockRejectedValueOnce(
+        new AuthError("Unauthorized: admin privileges are required.")
+      );
 
       // Act
       const result = await getAllOrders();
@@ -213,10 +215,6 @@ describe("Order Server Actions", () => {
   describe("updateOrderStatus", () => {
     it("should update status and increment stock if status changed to CANCELLED", async () => {
       // Arrange
-      (auth.api.getSession as any).mockResolvedValue({
-        user: { role: "ADMIN" },
-      });
-
       const existingOrder = {
         id: 5,
         status: "PENDING",
@@ -246,10 +244,6 @@ describe("Order Server Actions", () => {
 
     it("should just update status without touching stock if status is NOT CANCELLED", async () => {
       // Arrange
-      (auth.api.getSession as any).mockResolvedValue({
-        user: { role: "ADMIN" },
-      });
-
       (prisma.order.findUnique as any).mockResolvedValue({
         id: 5,
         status: "PENDING",

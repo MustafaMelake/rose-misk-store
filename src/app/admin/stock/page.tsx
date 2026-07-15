@@ -107,7 +107,7 @@ export default async function StockPage() {
                       Price:
                     </span>
                     <span className="font-semibold text-gray-900 dark:text-white">
-                      {variant.price} EGP
+                      {Number(variant.price)} EGP
                     </span>
                   </div>
 
