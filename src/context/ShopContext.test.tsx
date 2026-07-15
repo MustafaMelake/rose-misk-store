@@ -74,7 +74,6 @@ const TestComponent = () => {
     <div>
       <div data-testid="cart-count">{context.getCartCount}</div>
       <div data-testid="subtotal">{context.subtotal}</div>
-      <div data-testid="total">{context.total}</div>
       <button
         data-testid="add-btn"
         onClick={() => context.addToCart(1, "50ml")}
@@ -127,7 +126,6 @@ describe("ShopContextProvider", () => {
     });
 
     expect(screen.getByTestId("subtotal").textContent).toBe("0");
-    expect(screen.getByTestId("total").textContent).toBe("80");
   });
 
   it("should update local state and localStorage when adding items (Guest User)", async () => {
@@ -151,7 +149,6 @@ describe("ShopContextProvider", () => {
 
     expect(screen.getByTestId("cart-count").textContent).toBe("1");
     expect(screen.getByTestId("subtotal").textContent).toBe("100");
-    expect(screen.getByTestId("total").textContent).toBe("180");
 
     const savedCart = JSON.parse(
       localStorage.getItem("rose_misk_cart") || "{}"

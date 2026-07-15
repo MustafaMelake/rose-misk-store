@@ -37,14 +37,7 @@ const PlaceOrder: React.FC = () => {
 
   if (!context) return null;
 
-  const {
-    cartItems,
-    products,
-    currency,
-    delivery_fee,
-    placeOrder,
-    getPriceBySize,
-  } = context;
+  const { cartItems, products, currency, placeOrder, getPriceBySize } = context;
 
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("COD");

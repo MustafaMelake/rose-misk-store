@@ -65,7 +65,6 @@ interface DeliveryData {
 export interface ShopContextType {
   products: Product[];
   currency: string;
-  delivery_fee: number;
   searchOpen: boolean;
   setSearchOpen: React.Dispatch<React.SetStateAction<boolean>>;
   closeSearch: () => void;
@@ -79,7 +78,6 @@ export interface ShopContextType {
   ) => void;
   getCartCount: number;
   goToCheckout: () => void;
-  total: number;
   subtotal: number;
   placeOrder: (
     cartData: CartItems,
@@ -110,7 +108,6 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
   const userId = session.data?.user.id;
 
   const currency = "EGP ";
-  const delivery_fee = 80;
 
   // 1. تحميل المنتجات
   useEffect(() => {
@@ -217,8 +214,6 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
     return sum;
   }, [cartItems, products]);
 
-  const total = subtotal + delivery_fee;
-
   const fetchUserOrders = async () => {
     if (userId) {
       const result = await getUserOrders();
@@ -278,7 +273,6 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
   const value = {
     products,
     currency,
-    delivery_fee,
     searchOpen,
     setSearchOpen,
     closeSearch: () => setSearchOpen(false),
@@ -293,7 +287,6 @@ const ShopContextProvider: React.FC<{ children: ReactNode }> = ({
       return count;
     }, [cartItems]),
     goToCheckout: () => router.push("/placeorder"),
-    total,
     subtotal,
     placeOrder,
     userOrders,

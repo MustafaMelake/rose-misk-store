@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { revalidatePath } from "next/cache";
 import { calculateShippingFee } from "../../lib/shipping";
+import { orderInputSchema, orderItemsInputSchema } from "../validations";
 import {
   getCurrentUser,
   requireUser,
@@ -24,21 +25,32 @@ function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return value == null ? 0 : Number(value);
 }
 
-export async function createOrder(
-  orderData: any,
-  items: { id: number; size: string; quantity: number }[]
-) {
+export async function createOrder(orderData: unknown, items: unknown) {
   try {
     // Identity is derived from the session, never from the client.
     // A null user is a valid guest checkout.
     const currentUser = await getCurrentUser();
     const userId = currentUser?.id ?? null;
 
+    // Validate untrusted client input at the boundary. The client-supplied
+    // total is intentionally ignored — pricing is recomputed server-side.
+    const parsedOrder = orderInputSchema.safeParse(orderData);
+    const parsedItems = orderItemsInputSchema.safeParse(items);
+    if (!parsedOrder.success || !parsedItems.success) {
+      return {
+        success: false,
+        message: "Invalid order details. Please review your information.",
+      };
+    }
+    const orderInput = parsedOrder.data;
+    const orderItems = parsedItems.data;
+
     const result = await prisma.$transaction(async (tx) => {
       let serverTotal = new Prisma.Decimal(0);
-      const orderItemsToCreate = [];
+      const orderItemsToCreate: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] =
+        [];
 
-      for (const item of items) {
+      for (const item of orderItems) {
         const variant = await tx.productVariant.findFirst({
           where: { productId: item.id, volume: item.size },
         });
@@ -65,22 +77,21 @@ export async function createOrder(
         });
       }
 
-      const deliveryFee = calculateShippingFee(orderData.governorate);
+      const deliveryFee = calculateShippingFee(orderInput.governorate);
       const finalTotal = serverTotal.add(deliveryFee);
 
-      const initialStatus = (
-        orderData.paymentMethod === "CARD" ? "AWAITING_PAYMENT" : "PENDING"
-      ) as OrderStatusType;
+      const initialStatus: OrderStatusType =
+        orderInput.paymentMethod === "CARD" ? "AWAITING_PAYMENT" : "PENDING";
 
-      const orderCreationData: any = {
-        customerName: orderData.customerName,
-        customerEmail: orderData.customerEmail,
-        customerPhone: orderData.customerPhone,
-        governorate: orderData.governorate,
-        address: orderData.address,
+      const orderCreationData: Prisma.OrderUncheckedCreateInput = {
+        customerName: orderInput.customerName,
+        customerEmail: orderInput.customerEmail,
+        customerPhone: orderInput.customerPhone,
+        governorate: orderInput.governorate,
+        address: orderInput.address,
         shippingFee: deliveryFee,
         totalAmount: finalTotal,
-        paymentMethod: orderData.paymentMethod || "COD",
+        paymentMethod: orderInput.paymentMethod,
         status: initialStatus,
         items: { create: orderItemsToCreate },
       };

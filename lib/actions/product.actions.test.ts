@@ -33,6 +33,7 @@ vi.mock("../prisma", () => ({
     productVariant: {
       deleteMany: vi.fn(),
       findMany: vi.fn(),
+      upsert: vi.fn(),
     },
     orderItem: {
       groupBy: vi.fn(),
@@ -163,11 +164,13 @@ describe("Product Server Actions", () => {
   describe("updateProduct", () => {
     const updateData = {
       name: "Updated Perfume",
+      images: [],
       categoryId: 3,
       variants: [{ volume: "100ml", price: 150, stock: 5 }],
     };
 
-    it("should delete old variants and update the product", async () => {
+    it("should upsert variants and update the product's scalar fields", async () => {
+      (prisma.productVariant.upsert as any).mockResolvedValue({});
       (prisma.productVariant.deleteMany as any).mockResolvedValue({});
       (prisma.product.update as any).mockResolvedValue({
         id: 1,
@@ -176,9 +179,7 @@ describe("Product Server Actions", () => {
 
       const result = await updateProduct(1, updateData);
 
-      expect(prisma.productVariant.deleteMany).toHaveBeenCalledWith({
-        where: { productId: 1 },
-      });
+      // Scalar fields updated (no variants nested-create anymore)
       expect(prisma.product.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 1 },
@@ -188,6 +189,19 @@ describe("Product Server Actions", () => {
           }),
         })
       );
+
+      // Each incoming variant is upserted by (productId, volume)
+      expect(prisma.productVariant.upsert).toHaveBeenCalledWith({
+        where: { productId_volume: { productId: 1, volume: "100ml" } },
+        update: { price: 150, stock: 5 },
+        create: { productId: 1, volume: "100ml", price: 150, stock: 5 },
+      });
+
+      // Variants no longer present are removed
+      expect(prisma.productVariant.deleteMany).toHaveBeenCalledWith({
+        where: { productId: 1, volume: { notIn: ["100ml"] } },
+      });
+
       expect(revalidatePath).toHaveBeenCalledWith("/admin/products");
       expect(result.success).toBe(true);
     });

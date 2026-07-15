@@ -3,6 +3,7 @@
 import { prisma } from "../prisma";
 import { revalidatePath } from "next/cache";
 import { requireAdmin, PublicError, toPublicMessage } from "@/lib/auth-guards";
+import type { ProductUpdateInput } from "../validations";
 
 /**
  * Serialize a product's variant prices from Prisma.Decimal to plain numbers
@@ -147,7 +148,7 @@ export async function getProductById(id: string) {
   }
 }
 
-export async function updateProduct(id: number, data: any) {
+export async function updateProduct(id: number, data: ProductUpdateInput) {
   try {
     await requireAdmin();
     if (isNaN(id)) throw new PublicError("Invalid Product ID");
@@ -164,28 +165,47 @@ export async function updateProduct(id: number, data: any) {
       parsedCategoryId = null;
     }
 
-    const updatedProduct = await prisma.$transaction(async (tx) => {
-      await tx.productVariant.deleteMany({ where: { productId: id } });
+    const variantInputs = data.variants ?? [];
 
-      return await tx.product.update({
-        where: { id: id },
+    const updatedProduct = await prisma.$transaction(async (tx) => {
+      // Update scalar product fields.
+      const product = await tx.product.update({
+        where: { id },
         data: {
           name: data.name,
           description: data.description,
           company: data.company,
           images: data.images,
           isFeatured: Boolean(data.isFeatured),
-          subcategory: data.subcategory,
+          subcategory: data.subcategory ?? undefined,
           categoryId: parsedCategoryId,
-          variants: {
-            create: data.variants.map((v: any) => ({
-              volume: v.volume,
-              price: Number(v.price),
-              stock: Number(v.stock),
-            })),
-          },
         },
       });
+
+      // Upsert variants by (productId, volume): keeps ids/stock for volumes
+      // that still exist instead of dropping and recreating every row.
+      for (const v of variantInputs) {
+        await tx.productVariant.upsert({
+          where: { productId_volume: { productId: id, volume: v.volume } },
+          update: { price: Number(v.price), stock: Number(v.stock) },
+          create: {
+            productId: id,
+            volume: v.volume,
+            price: Number(v.price),
+            stock: Number(v.stock),
+          },
+        });
+      }
+
+      // Remove any variants whose volume is no longer in the payload.
+      await tx.productVariant.deleteMany({
+        where: {
+          productId: id,
+          volume: { notIn: variantInputs.map((v) => v.volume) },
+        },
+      });
+
+      return product;
     });
 
     revalidatePath("/admin/products");
@@ -307,6 +327,9 @@ export async function getTopSellingProducts() {
     });
 
     const productIds = topSellersGrouping.map((item) => item.productId);
+
+    // No sales yet — skip the follow-up lookups entirely.
+    if (productIds.length === 0) return [];
 
     const products = await prisma.product.findMany({
       where: { id: { in: productIds } },
